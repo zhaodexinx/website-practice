@@ -46,6 +46,9 @@
         display: flex;
         gap: 10px;
       }
+      .tools {
+        margin-top: 12px;
+      }
       input {
         flex: 1;
         border: 1px solid #d8dff5;
@@ -85,6 +88,21 @@
         font-size: 13px;
         color: #666;
       }
+      .actions {
+        margin-top: 10px;
+        display: flex;
+        justify-content: center;
+      }
+      #load-more-btn {
+        background: #fff;
+        color: #2c4bd6;
+        border: 1px solid #d8dff5;
+      }
+      .meta {
+        margin-top: 4px;
+        color: #666;
+        font-size: 12px;
+      }
     </style>
   </head>
   <body>
@@ -98,8 +116,14 @@
         <input id="msg-input" type="text" placeholder="输入留言内容..." maxlength="120" required />
         <button id="submit-btn" type="submit">提交</button>
       </form>
+      <div class="row tools">
+        <input id="search-input" type="text" placeholder="搜索留言（支持模糊匹配）..." />
+      </div>
       <div id="status" class="status"></div>
       <ul id="msg-list"></ul>
+      <div class="actions">
+        <button id="load-more-btn" type="button">加载更多</button>
+      </div>
     </main>
 
     <script>
@@ -111,7 +135,14 @@
       const listEl = document.getElementById("msg-list");
       const formEl = document.getElementById("msg-form");
       const inputEl = document.getElementById("msg-input");
+      const searchInputEl = document.getElementById("search-input");
       const submitBtnEl = document.getElementById("submit-btn");
+      const loadMoreBtnEl = document.getElementById("load-more-btn");
+      const PAGE_SIZE = 5;
+      let currentPage = 0;
+      let currentKeyword = "";
+      let hasMore = true;
+      let supabaseClient = null;
 
       function setStatus(text, isError = false) {
         statusEl.textContent = text;
@@ -124,8 +155,38 @@
           return;
         }
         listEl.innerHTML = messages
-          .map((item) => `<li>${item.content}</li>`)
+          .map(
+            (item) => `
+              <li>
+                <div>${item.content}</div>
+                <div class="meta">${new Date(item.created_at).toLocaleString("zh-CN", { hour12: false })}</div>
+              </li>
+            `
+          )
           .join("");
+      }
+
+      function appendMessages(messages) {
+        if (!messages || messages.length === 0) return;
+        const html = messages
+          .map(
+            (item) => `
+              <li>
+                <div>${item.content}</div>
+                <div class="meta">${new Date(item.created_at).toLocaleString("zh-CN", { hour12: false })}</div>
+              </li>
+            `
+          )
+          .join("");
+        if (listEl.innerHTML.includes("暂无留言")) {
+          listEl.innerHTML = html;
+        } else {
+          listEl.insertAdjacentHTML("beforeend", html);
+        }
+      }
+
+      function updateLoadMoreBtn() {
+        loadMoreBtnEl.style.display = hasMore ? "inline-block" : "none";
       }
 
       function loadScript(src) {
@@ -156,19 +217,51 @@
         throw new Error("Supabase SDK 加载失败，请检查网络后重试");
       }
 
-      async function loadMessages(supabase) {
-        const { data, error } = await supabase
+      async function loadMessages(supabase, reset = false) {
+        if (reset) {
+          currentPage = 0;
+          hasMore = true;
+        }
+        const from = currentPage * PAGE_SIZE;
+        const to = from + PAGE_SIZE - 1;
+        let query = supabase
           .from("messages")
           .select("id, content, created_at")
           .order("id", { ascending: false })
-          .limit(20);
+          .range(from, to);
+
+        if (currentKeyword) {
+          query = query.ilike("content", `%${currentKeyword}%`);
+        }
+
+        const { data, error } = await query;
 
         if (error) {
           setStatus("读取失败：" + error.message, true);
           return;
         }
-        renderMessages(data);
-        setStatus("留言已加载");
+        hasMore = data.length === PAGE_SIZE;
+        updateLoadMoreBtn();
+        if (reset) {
+          renderMessages(data);
+        } else {
+          appendMessages(data);
+        }
+        setStatus(currentKeyword ? `已按关键词“${currentKeyword}”加载` : "留言已加载");
+      }
+
+      async function refreshTopMessages() {
+        if (!supabaseClient) return;
+        const { data, error } = await supabaseClient
+          .from("messages")
+          .select("id, content, created_at")
+          .order("id", { ascending: false })
+          .range(0, currentPage * PAGE_SIZE + PAGE_SIZE - 1)
+          .ilike("content", `%${currentKeyword}%`);
+
+        if (!error) {
+          renderMessages(data);
+        }
       }
 
       async function bootstrap() {
@@ -191,8 +284,9 @@
           SUPABASE_URL,
           SUPABASE_PUBLISHABLE_KEY
         );
+        supabaseClient = supabase;
 
-        await loadMessages(supabase);
+        await loadMessages(supabase, true);
 
         formEl.addEventListener("submit", async (event) => {
           event.preventDefault();
@@ -210,10 +304,33 @@
           }
 
           inputEl.value = "";
-          await loadMessages(supabase);
+          await loadMessages(supabase, true);
           setStatus("提交成功");
           submitBtnEl.disabled = false;
         });
+
+        loadMoreBtnEl.addEventListener("click", async () => {
+          if (!hasMore) return;
+          currentPage += 1;
+          await loadMessages(supabase, false);
+        });
+
+        searchInputEl.addEventListener("input", async () => {
+          currentKeyword = searchInputEl.value.trim();
+          await loadMessages(supabase, true);
+        });
+
+        supabase
+          .channel("messages-realtime")
+          .on(
+            "postgres_changes",
+            { event: "INSERT", schema: "public", table: "messages" },
+            async () => {
+              await refreshTopMessages();
+              setStatus("收到新留言，列表已自动刷新");
+            }
+          )
+          .subscribe();
       }
 
       bootstrap();
