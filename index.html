@@ -41,14 +41,148 @@
         color: #2c4bd6;
         font-size: 14px;
       }
+      .row {
+        margin-top: 18px;
+        display: flex;
+        gap: 10px;
+      }
+      input {
+        flex: 1;
+        border: 1px solid #d8dff5;
+        border-radius: 10px;
+        padding: 10px 12px;
+        font-size: 14px;
+      }
+      button {
+        border: 0;
+        border-radius: 10px;
+        padding: 10px 14px;
+        background: #2c4bd6;
+        color: #fff;
+        font-size: 14px;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      ul {
+        margin: 14px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+      li {
+        background: #f7f9ff;
+        border: 1px solid #e8edff;
+        border-radius: 10px;
+        padding: 10px 12px;
+        margin-bottom: 8px;
+        color: #333;
+      }
+      .status {
+        min-height: 20px;
+        margin-top: 10px;
+        font-size: 13px;
+        color: #666;
+      }
     </style>
   </head>
   <body>
     <main class="card">
       <h1>网站已成功上线</h1>
       <p>你好，我是 zhaodexinx，这是我的第一个 Cloudflare Pages 网站。</p>
-      <p>后续我会持续更新页面内容、样式和功能。</p>
+      <p>这里已经接入 Supabase 留言板，可以直接写入数据库。</p>
       <span class="tag">Powered by GitHub + Cloudflare Pages</span>
+
+      <form id="msg-form" class="row">
+        <input id="msg-input" type="text" placeholder="输入留言内容..." maxlength="120" required />
+        <button id="submit-btn" type="submit">提交</button>
+      </form>
+      <div id="status" class="status"></div>
+      <ul id="msg-list"></ul>
     </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+      // TODO: 替换成你自己的 Supabase 项目配置
+      const SUPABASE_URL = "https://YOUR_PROJECT_ID.supabase.co";
+      const SUPABASE_PUBLISHABLE_KEY = "YOUR_SB_PUBLISHABLE_KEY";
+
+      const statusEl = document.getElementById("status");
+      const listEl = document.getElementById("msg-list");
+      const formEl = document.getElementById("msg-form");
+      const inputEl = document.getElementById("msg-input");
+      const submitBtnEl = document.getElementById("submit-btn");
+
+      function setStatus(text, isError = false) {
+        statusEl.textContent = text;
+        statusEl.style.color = isError ? "#d12c2c" : "#666";
+      }
+
+      function renderMessages(messages) {
+        if (!messages || messages.length === 0) {
+          listEl.innerHTML = "<li>暂无留言，来发布第一条吧。</li>";
+          return;
+        }
+        listEl.innerHTML = messages
+          .map((item) => `<li>${item.content}</li>`)
+          .join("");
+      }
+
+      async function loadMessages(supabase) {
+        const { data, error } = await supabase
+          .from("messages")
+          .select("id, content, created_at")
+          .order("id", { ascending: false })
+          .limit(20);
+
+        if (error) {
+          setStatus("读取失败：" + error.message, true);
+          return;
+        }
+        renderMessages(data);
+        setStatus("留言已加载");
+      }
+
+      async function bootstrap() {
+        if (
+          SUPABASE_URL.includes("YOUR_PROJECT_ID") ||
+          SUPABASE_PUBLISHABLE_KEY.includes("YOUR_SB_PUBLISHABLE_KEY")
+        ) {
+          setStatus("请先在 index.html 中填入 Supabase URL 和 Publishable Key", true);
+          return;
+        }
+
+        const supabase = window.supabase.createClient(
+          SUPABASE_URL,
+          SUPABASE_PUBLISHABLE_KEY
+        );
+
+        await loadMessages(supabase);
+
+        formEl.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const content = inputEl.value.trim();
+          if (!content) return;
+
+          submitBtnEl.disabled = true;
+          setStatus("提交中...");
+
+          const { error } = await supabase.from("messages").insert([{ content }]);
+          if (error) {
+            setStatus("提交失败：" + error.message, true);
+            submitBtnEl.disabled = false;
+            return;
+          }
+
+          inputEl.value = "";
+          await loadMessages(supabase);
+          setStatus("提交成功");
+          submitBtnEl.disabled = false;
+        });
+      }
+
+      bootstrap();
+    </script>
   </body>
 </html>
