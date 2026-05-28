@@ -102,11 +102,10 @@
       <ul id="msg-list"></ul>
     </main>
 
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script>
       // TODO: 替换成你自己的 Supabase 项目配置
-      const SUPABASE_URL = "https://YOUR_PROJECT_ID.supabase.co";
-      const SUPABASE_PUBLISHABLE_KEY = "YOUR_SB_PUBLISHABLE_KEY";
+      const SUPABASE_URL = "https://dtdfyjfshbkkskqveiaf.supabase.co";
+      const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_81n2UxIOHDuV4D5d7xYRsA_OCy9DhSt";
 
       const statusEl = document.getElementById("status");
       const listEl = document.getElementById("msg-list");
@@ -127,6 +126,34 @@
         listEl.innerHTML = messages
           .map((item) => `<li>${item.content}</li>`)
           .join("");
+      }
+
+      function loadScript(src) {
+        return new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = src;
+          script.async = true;
+          script.onload = resolve;
+          script.onerror = reject;
+          document.head.appendChild(script);
+        });
+      }
+
+      async function ensureSupabaseLoaded() {
+        if (window.supabase && window.supabase.createClient) return;
+        const cdnList = [
+          "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2",
+          "https://unpkg.com/@supabase/supabase-js@2"
+        ];
+        for (const url of cdnList) {
+          try {
+            await loadScript(url);
+            if (window.supabase && window.supabase.createClient) return;
+          } catch (_) {
+            // 尝试下一个 CDN
+          }
+        }
+        throw new Error("Supabase SDK 加载失败，请检查网络后重试");
       }
 
       async function loadMessages(supabase) {
@@ -150,6 +177,13 @@
           SUPABASE_PUBLISHABLE_KEY.includes("YOUR_SB_PUBLISHABLE_KEY")
         ) {
           setStatus("请先在 index.html 中填入 Supabase URL 和 Publishable Key", true);
+          return;
+        }
+
+        try {
+          await ensureSupabaseLoaded();
+        } catch (err) {
+          setStatus(err.message, true);
           return;
         }
 
